@@ -2,6 +2,7 @@ import { CreateMLCEngine } from "https://esm.run/@mlc-ai/web-llm";
 
 // --- DOM要素 ---
 const statusEl = document.getElementById('status');
+const modelSelect = document.getElementById('model-select');
 const loadBtn = document.getElementById('load-btn');
 const resetBtn = document.getElementById('reset-btn');
 const themeContainer = document.getElementById('theme-container');
@@ -10,9 +11,38 @@ const forbiddenWordsDisplay = document.getElementById('forbidden-words-display')
 const chatLog = document.getElementById('chat-log');
 const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
+const resultContainer = document.getElementById('result-container');
+const resultCanvas = document.getElementById('result-canvas');
+const saveImageBtn = document.getElementById('save-image-btn');
+const downloadLink = document.getElementById('download-link');
 
-// --- ゲーム設定 ---
-
+// --- ゲームとモデルの設定 ---
+const MODELS = {
+    "Qwen2.5-1.5B-Instruct-q4f32_1-MLC": {
+        "model": "https://huggingface.co/mlc-ai/Qwen2.5-1.5B-Instruct-q4f32_1-MLC/resolve/main/",
+        "model_id": "Qwen2.5-1.5B-Instruct-q4f32_1-MLC",
+        "model_lib": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/gemma/Qwen2-1.5B-Instruct-q4f32_1-ctx4k_cs1k-webgpu.wasm",
+        "displaySize": "1.5B"
+    },
+    "gemma-2b-it-q4f32_1-MLC": {
+        "model": "https://huggingface.co/mlc-ai/gemma-2b-it-q4f32_1-MLC/resolve/main/",
+        "model_id": "gemma-2b-it-q4f32_1-MLC",
+        "model_lib": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/gemma/gemma-2b-it-q4f32_1-ctx2k-webgpu.wasm",
+        "displaySize": "2B"
+    },
+    "Phi-3-mini-4k-instruct-q4f32_1-MLC": {
+        "model": "https://huggingface.co/mlc-ai/Phi-3-mini-4k-instruct-q4f32_1-MLC/resolve/main/",
+        "model_id": "Phi-3-mini-4k-instruct-q4f32_1-MLC",
+        "model_lib": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/phi/Phi-3-mini-4k-instruct-q4f32_1-ctx4k-webgpu.wasm",
+        "displaySize": "3.8B"
+    },
+    "Llama-3-8B-Instruct-q4f32_1-MLC": {
+        "model": "https://huggingface.co/mlc-ai/Llama-3-8B-Instruct-q4f32_1-MLC/resolve/main/",
+        "model_id": "Llama-3-8B-Instruct-q4f32_1-MLC",
+        "model_lib": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/Llama-3/Llama-3-8B-Instruct-q4f32_1-ctx4k_cs1k-webgpu.wasm",
+        "displaySize": "8B"
+    }
+};
 
 const THEMES = [
     { target: "チョコレート", forbidden: ["甘い", "お菓子", "茶色", "カカオ"] },
@@ -40,25 +70,37 @@ const MAX_TURNS = 5;
 
 // --- グローバル変数 ---
 let engine = null;
+let selectedModelName = '';
 let isModelLoaded = false;
 let isGameOver = true;
+let isComposing = false;
 let turnCount = 0;
 let currentTheme = {};
 let chatHistory = [];
 
 // --- 初期化 ---
 
-// モデルをロードする関数
+function initModelSelect() {
+    for (const modelId in MODELS) {
+        const option = document.createElement('option');
+        option.value = modelId;
+        const displaySize = MODELS[modelId].displaySize || 'サイズ不明';
+        option.textContent = `${modelId} (${displaySize} params)`;
+        modelSelect.appendChild(option);
+    }
+}
+
 async function loadModel() {
-    setUILoading();
+    setUILoading(true);
+    selectedModelName = modelSelect.value;
     
     try {
-        const selectedModel = "Qwen2.5-1.5B-Instruct-q4f32_1-MLC";
-        engine = await CreateMLCEngine(selectedModel, {
+        const appConfig = { model_list: [MODELS[selectedModelName]] };
+        engine = await CreateMLCEngine(selectedModelName, {
             initProgressCallback: (initProgress) => {
                 statusEl.textContent = `モデル読込中... ${Math.round(initProgress.progress * 100)}% - ${initProgress.text || ""}`;
             },
-        });
+        }, appConfig);
         
         isModelLoaded = true;
         setUILoaded();
@@ -67,26 +109,24 @@ async function loadModel() {
     } catch (error) {
         console.error("モデルのロードに失敗:", error);
         statusEl.textContent = `モデルのロードに失敗しました: ${error.message}`;
-        loadBtn.disabled = false;
+        setUILoading(false);
     }
 }
 
 // --- ゲーム進行 ---
 
-// ゲームをリセットまたは開始する関数
 function resetGame() {
     turnCount = 0;
     isGameOver = false;
     chatHistory = [];
+    resultContainer.style.display = 'none';
     
-    // ランダムにお題を選択
     const theme = THEMES[Math.floor(Math.random() * THEMES.length)];
     currentTheme = { 
         ...theme, 
         forbidden: [...theme.forbidden, theme.target] 
     };
 
-    // ニュートラルな会話パートナーとしてプロンプトを固定
     const systemPrompt = "あなたは知識が豊富なAIアシスタントです。ユーザーからの質問や会話に対して、誠実かつ自然に日本語で応答してください。";
     chatHistory.push({ role: "system", content: systemPrompt });
 
@@ -96,12 +136,10 @@ function resetGame() {
     setUIGameActive(true);
 }
 
-// プレイヤーのメッセージを処理する関数
 async function handleSendMessage() {
     const message = userInput.value.trim();
     if (message === "" || isGameOver) return;
 
-    // 禁止ワードチェック
     const foundForbiddenWord = currentTheme.forbidden.find(word => message.includes(word));
     if (foundForbiddenWord) {
         alert(`禁止ワード「${foundForbiddenWord}」が含まれています！`);
@@ -111,27 +149,24 @@ async function handleSendMessage() {
     addUserMessage(message);
     chatHistory.push({ role: "user", content: message });
     userInput.value = "";
-    setUIGameActive(false); // AIの応答中は操作不可に
-
+    setUIGameActive(false);
     await generateAIReply();
 }
 
-// AIの応答を生成する関数
 async function generateAIReply() {
     try {
-        const aiMessageEl = addAIMessage(""); // 空のAIメッセージ欄を追加
-        
+        const aiMessageEl = addAIMessage("");
         const chunks = await engine.chat.completions.create({
             messages: chatHistory,
             stream: true,
-            max_tokens: 50, // 生成する最大トークン数を指定
+            max_tokens: 50,
         });
         
         let fullResponse = '';
         for await (const chunk of chunks) {
             const content = chunk.choices[0]?.delta?.content || "";
             fullResponse += content;
-            aiMessageEl.textContent = fullResponse; // ストリーミングで表示を更新
+            aiMessageEl.textContent = fullResponse;
             chatLog.scrollTop = chatLog.scrollHeight;
         }
 
@@ -141,43 +176,177 @@ async function generateAIReply() {
     } catch (error) {
         console.error("テキスト生成に失敗:", error);
         addSystemMessage(`エラー: ${error.message}`);
-        setUIGameActive(true); // エラーが発生したら操作可能に戻す
+        setUIGameActive(true);
     }
 }
 
-// ゲームの状態をチェックする関数
 function checkGameStatus(aiResponse) {
     turnCount++;
-
     if (aiResponse.includes(currentTheme.target)) {
         addSystemMessage(`🎉 クリア！おめでとうございます！見事に「${currentTheme.target}」と言わせました！`);
         isGameOver = true;
         setUIGameActive(false);
+        resultContainer.style.display = 'block';
+        generateShareImage(true);
     } else if (turnCount >= MAX_TURNS) {
         addSystemMessage(`😢 ターン切れ...残念！今回の目標は「${currentTheme.target}」でした。`);
         isGameOver = true;
         setUIGameActive(false);
+        resultContainer.style.display = 'block';
+        generateShareImage(false);
     } else {
         addSystemMessage(`（残り ${MAX_TURNS - turnCount} ターン）`);
-        setUIGameActive(true); // 次のターンへ
+        setUIGameActive(true);
     }
+}
+
+// --- 画像生成＆保存 ---
+
+function calculateWrappedTextHeight(context, text, maxWidth, lineHeight) {
+    let line = '';
+    const characters = text.split('');
+    let lineCount = 1;
+
+    for (let i = 0; i < characters.length; i++) {
+        const testLine = line + characters[i];
+        const metrics = context.measureText(testLine);
+        if (metrics.width > maxWidth && i > 0) {
+            line = characters[i];
+            lineCount++;
+        } else {
+            line = testLine;
+        }
+    }
+    return lineCount * lineHeight;
+}
+
+function wrapText(context, text, x, y, maxWidth, lineHeight) {
+    let line = '';
+    const characters = text.split('');
+
+    for (let i = 0; i < characters.length; i++) {
+        const testLine = line + characters[i];
+        const metrics = context.measureText(testLine);
+        if (metrics.width > maxWidth && i > 0) {
+            context.fillText(line, x, y);
+            line = characters[i];
+            y += lineHeight;
+        } else {
+            line = testLine;
+        }
+    }
+    context.fillText(line, x, y);
+}
+
+function generateShareImage(isSuccess) {
+    const ctx = resultCanvas.getContext('2d');
+    const width = resultCanvas.width;
+    const padding = 20;
+    const maxTextWidth = width - (padding * 2);
+    const headerHeight = 170;
+    const footerHeight = 40;
+    const logLineHeight = 20; // 小さくした
+    const logMargin = 10;
+
+    // --- 1. 高さの事前計算 ---
+    let totalHeight = headerHeight + footerHeight;
+    ctx.font = '14px sans-serif'; // 計算用にフォントを先に設定
+    chatHistory.forEach(item => {
+        if (item.role === 'user' || item.role === 'assistant') {
+            const text = (item.role === 'user' ? 'あなた: ' : 'AI: ') + item.content;
+            totalHeight += calculateWrappedTextHeight(ctx, text, maxTextWidth, logLineHeight);
+            totalHeight += logMargin;
+        }
+    });
+
+    // --- 2. Canvasリサイズ ---
+    resultCanvas.height = totalHeight;
+
+    // --- 3. 描画処理 ---
+    // 背景
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, totalHeight);
+    ctx.strokeStyle = '#eeeeee';
+    ctx.lineWidth = padding;
+    ctx.strokeRect(0, 0, width, totalHeight);
+
+    // タイトル
+    ctx.fillStyle = '#333';
+    ctx.font = 'bold 28px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('言わせてみろ！', width / 2, 55);
+
+    // 結果
+    if (isSuccess) {
+        ctx.fillStyle = '#4285f4';
+        ctx.font = 'bold 40px sans-serif';
+        ctx.fillText('CLEAR!!', width / 2, 105);
+    } else {
+        ctx.fillStyle = '#d93025';
+        ctx.font = 'bold 40px sans-serif';
+        ctx.fillText('FAILED...', width / 2, 105);
+    }
+
+    // お題
+    ctx.fillStyle = '#555';
+    ctx.font = '18px sans-serif';
+    ctx.fillText(`お題: ${currentTheme.target}`, width / 2, 140);
+
+    // 線
+    ctx.beginPath();
+    ctx.moveTo(padding, 160);
+    ctx.lineTo(width - padding, 160);
+    ctx.strokeStyle = '#dddddd';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // 会話ログ描画
+    let currentY = 185;
+    ctx.font = '14px sans-serif'; // 小さくした
+
+    chatHistory.forEach(item => {
+        if (item.role === 'user') {
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#007bff';
+            wrapText(ctx, `あなた: ${item.content}`, width - padding, currentY, maxTextWidth, logLineHeight);
+            currentY += calculateWrappedTextHeight(ctx, `あなた: ${item.content}`, maxTextWidth, logLineHeight) + logMargin;
+        } else if (item.role === 'assistant') {
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#333333';
+            wrapText(ctx, `AI: ${item.content}`, padding, currentY, maxTextWidth, logLineHeight);
+            currentY += calculateWrappedTextHeight(ctx, `AI: ${item.content}`, maxTextWidth, logLineHeight) + logMargin;
+        }
+    });
+
+    // フッター: モデル名
+    ctx.fillStyle = '#999';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(`Model: ${selectedModelName}`, width - padding, totalHeight - 15);
+}
+
+function saveImage() {
+    const dataUrl = resultCanvas.toDataURL('image/png');
+    downloadLink.href = dataUrl;
+    downloadLink.download = 'iwasetemiro_result.png';
+    downloadLink.click();
 }
 
 // --- UI更新ヘルパー ---
 
-function setUILoading() {
-    statusEl.textContent = "モデルをロード中...";
-    loadBtn.disabled = true;
-    resetBtn.disabled = true;
-    sendBtn.disabled = true;
-    userInput.disabled = true;
+function setUILoading(isLoading) {
+    modelSelect.disabled = isLoading;
+    loadBtn.disabled = isLoading;
+    statusEl.textContent = isLoading ? "モデルをロード中..." : "モデルを選択してください";
 }
 
 function setUILoaded() {
-    loadBtn.style.display = 'none'; // ロードボタンを隠す
-    resetBtn.style.display = 'inline-block'; // リセットボタンを表示
+    loadBtn.style.display = 'none';
+    modelSelect.style.display = 'none';
+    document.querySelector('label[for="model-select"]').style.display = 'none';
+    resetBtn.style.display = 'inline-block';
     resetBtn.disabled = false;
-    statusEl.textContent = "モデルのロード完了！";
+    statusEl.textContent = `モデル「${selectedModelName}」のロード完了！`;
 }
 
 function setUIGameActive(active) {
@@ -216,7 +385,7 @@ function addAIMessage(text) {
     messageEl.appendChild(span);
     chatLog.appendChild(messageEl);
     chatLog.scrollTop = chatLog.scrollHeight;
-    return span; // ストリーミング更新用にspan要素を返す
+    return span;
 }
 
 function addSystemMessage(text) {
@@ -231,13 +400,22 @@ function addSystemMessage(text) {
 loadBtn.addEventListener('click', loadModel);
 resetBtn.addEventListener('click', resetGame);
 sendBtn.addEventListener('click', handleSendMessage);
+saveImageBtn.addEventListener('click', saveImage);
 
+// 日本語入力対応
+userInput.addEventListener('compositionstart', () => {
+    isComposing = true;
+});
+userInput.addEventListener('compositionend', () => {
+    isComposing = false;
+});
 userInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !userInput.disabled) {
+    if (e.key === 'Enter' && !e.shiftKey && !userInput.disabled && !isComposing) {
         e.preventDefault();
         handleSendMessage();
     }
 });
 
-// --- 初期メッセージ ---
-addSystemMessage("「モデルをロード」ボタンを押してゲームを開始してください。");
+// --- 初期実行 ---
+initModelSelect();
+addSystemMessage("モデルを選択してロードしてください。");
