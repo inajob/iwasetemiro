@@ -80,6 +80,8 @@
             cursor: pointer;
             font-size: 1em;
             transition: background-color 0.2s;
+            /* width: 100%; を削除 */
+            box-sizing: border-box; /* paddingを含めて幅を計算 */
         }
         .btn:hover:not(:disabled) {
             background-color: #3367d6;
@@ -90,21 +92,22 @@
         }
         #controls {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
+            flex-direction: column; /* 縦並びに変更 */
+            gap: 10px; /* 要素間の隙間 */
             margin-bottom: 20px;
-            flex-wrap: wrap; /* 折り返しを追加 */
-            gap: 15px; /* 要素間の隙間 */
         }
-        .control-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
+        label[for="model-select"] {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+            color: #555;
         }
         #model-select {
+            width: 100%;
             padding: 8px;
             border-radius: 5px;
             border: 1px solid #ddd;
+            box-sizing: border-box;
         }
         .user-message, .ai-message {
             margin-bottom: 10px;
@@ -143,11 +146,11 @@
     
     <div id="game-container">
         <div id="controls">
-            <div class="control-group">
-                <label for="model-select">1. モデルを選択:</label>
+            <div>
+                <label for="model-select">1. モデルを選択</label>
                 <select id="model-select"></select>
-                <button id="load-btn" class="btn">2. モデルをロード</button>
             </div>
+            <button id="load-btn" class="btn">2. モデルをロード</button>
             <button id="reset-btn" class="btn" disabled>リセット</button>
         </div>
 
