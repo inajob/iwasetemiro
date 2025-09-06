@@ -80,8 +80,7 @@
             cursor: pointer;
             font-size: 1em;
             transition: background-color 0.2s;
-            /* width: 100%; を削除 */
-            box-sizing: border-box; /* paddingを含めて幅を計算 */
+            box-sizing: border-box;
         }
         .btn:hover:not(:disabled) {
             background-color: #3367d6;
@@ -92,9 +91,12 @@
         }
         #controls {
             display: flex;
-            flex-direction: column; /* 縦並びに変更 */
-            gap: 10px; /* 要素間の隙間 */
+            flex-direction: column;
+            gap: 10px;
             margin-bottom: 20px;
+        }
+        #controls .btn {
+            width: 100%;
         }
         label[for="model-select"] {
             display: block;
@@ -108,6 +110,15 @@
             border-radius: 5px;
             border: 1px solid #ddd;
             box-sizing: border-box;
+        }
+        .game-mode-selector {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 8px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
         }
         .user-message, .ai-message {
             margin-bottom: 10px;
@@ -151,6 +162,10 @@
                 <select id="model-select"></select>
             </div>
             <button id="load-btn" class="btn">2. モデルをロード</button>
+            <div class="game-mode-selector">
+                <input type="checkbox" id="easy-mode-toggle">
+                <label for="easy-mode-toggle">簡単モード（禁止ワードが目標ワードのみになります）</label>
+            </div>
             <button id="reset-btn" class="btn" disabled>リセット</button>
         </div>
 
@@ -168,7 +183,7 @@
         
         <div id="input-container">
             <textarea id="user-input" placeholder="メッセージを入力...（50文字まで）" rows="2" disabled maxlength="50"></textarea>
-            <button id="send-btn" class="btn" disabled>送信</button>
+            <button id="send-btn" class="btn">送信</button>
         </div>
     </div>
 

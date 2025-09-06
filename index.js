@@ -5,6 +5,7 @@ const statusEl = document.getElementById('status');
 const modelSelect = document.getElementById('model-select');
 const loadBtn = document.getElementById('load-btn');
 const resetBtn = document.getElementById('reset-btn');
+const easyModeToggle = document.getElementById('easy-mode-toggle');
 const themeContainer = document.getElementById('theme-container');
 const targetWordDisplay = document.getElementById('target-word-display');
 const forbiddenWordsDisplay = document.getElementById('forbidden-words-display');
@@ -122,9 +123,14 @@ function resetGame() {
     resultContainer.style.display = 'none';
     
     const theme = THEMES[Math.floor(Math.random() * THEMES.length)];
+    const isEasyMode = easyModeToggle.checked;
+    
+    // モードに応じて禁止ワードを設定
+    const forbiddenWords = isEasyMode ? [theme.target] : [...theme.forbidden, theme.target];
+    
     currentTheme = { 
         ...theme, 
-        forbidden: [...theme.forbidden, theme.target] 
+        forbidden: forbiddenWords 
     };
 
     const systemPrompt = "あなたは知識が豊富なAIアシスタントです。ユーザーからの質問や会話に対して、誠実かつ自然に日本語で応答してください。";
@@ -245,12 +251,12 @@ function generateShareImage(isSuccess) {
     const maxTextWidth = width - (padding * 2);
     const headerHeight = 170;
     const footerHeight = 40;
-    const logLineHeight = 20; // 小さくした
+    const logLineHeight = 20;
     const logMargin = 10;
 
     // --- 1. 高さの事前計算 ---
     let totalHeight = headerHeight + footerHeight;
-    ctx.font = '14px sans-serif'; // 計算用にフォントを先に設定
+    ctx.font = '14px sans-serif';
     chatHistory.forEach(item => {
         if (item.role === 'user' || item.role === 'assistant') {
             const text = (item.role === 'user' ? 'あなた: ' : 'AI: ') + item.content;
@@ -263,20 +269,17 @@ function generateShareImage(isSuccess) {
     resultCanvas.height = totalHeight;
 
     // --- 3. 描画処理 ---
-    // 背景
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, width, totalHeight);
     ctx.strokeStyle = '#eeeeee';
     ctx.lineWidth = padding;
     ctx.strokeRect(0, 0, width, totalHeight);
 
-    // タイトル
     ctx.fillStyle = '#333';
     ctx.font = 'bold 28px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('言わせてみろ！', width / 2, 55);
 
-    // 結果
     if (isSuccess) {
         ctx.fillStyle = '#4285f4';
         ctx.font = 'bold 40px sans-serif';
@@ -287,12 +290,10 @@ function generateShareImage(isSuccess) {
         ctx.fillText('FAILED...', width / 2, 105);
     }
 
-    // お題
     ctx.fillStyle = '#555';
     ctx.font = '18px sans-serif';
     ctx.fillText(`お題: ${currentTheme.target}`, width / 2, 140);
 
-    // 線
     ctx.beginPath();
     ctx.moveTo(padding, 160);
     ctx.lineTo(width - padding, 160);
@@ -300,9 +301,8 @@ function generateShareImage(isSuccess) {
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    // 会話ログ描画
     let currentY = 185;
-    ctx.font = '14px sans-serif'; // 小さくした
+    ctx.font = '14px sans-serif';
 
     chatHistory.forEach(item => {
         if (item.role === 'user') {
@@ -318,7 +318,6 @@ function generateShareImage(isSuccess) {
         }
     });
 
-    // フッター: モデル名
     ctx.fillStyle = '#999';
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'right';
@@ -337,7 +336,7 @@ function saveImage() {
 function setUILoading(isLoading) {
     modelSelect.disabled = isLoading;
     loadBtn.disabled = isLoading;
-    statusEl.textContent = isLoading ? "モデルをロード中..." : "モデルを選択してください";
+    easyModeToggle.disabled = isLoading;
 }
 
 function setUILoaded() {
@@ -346,6 +345,7 @@ function setUILoaded() {
     document.querySelector('label[for="model-select"]').style.display = 'none';
     resetBtn.style.display = 'inline-block';
     resetBtn.disabled = false;
+    easyModeToggle.disabled = false;
     statusEl.textContent = `モデル「${selectedModelName}」のロード完了！`;
 }
 
