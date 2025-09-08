@@ -42,6 +42,30 @@ const MODELS = {
         "model_id": "Llama-3-8B-Instruct-q4f32_1-MLC",
         "model_lib": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/Llama-3/Llama-3-8B-Instruct-q4f32_1-ctx4k_cs1k-webgpu.wasm",
         "displaySize": "8B"
+    },
+    "Qwen3-0.6B-q4f16_1-MLC": {
+        "model": "https://huggingface.co/mlc-ai/Qwen3-0.6B-q4f16_1-MLC/resolve/main/",
+        "model_id": "Qwen3-0.6B-q4f16_1-MLC",
+        "model_lib": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/v0_2_48/Qwen3-0.6B-q4f16_1-ctx4k_cs1k-webgpu.wasm",
+        "displaySize": "0.6B"
+    },
+    "Qwen3-1.7B-q4f16_1-MLC": {
+        "model": "https://huggingface.co/mlc-ai/Qwen3-1.7B-q4f16_1-MLC/resolve/main/",
+        "model_id": "Qwen3-1.7B-q4f16_1-MLC",
+        "model_lib": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/v0_2_48/Qwen3-1.7B-q4f16_1-ctx4k_cs1k-webgpu.wasm",
+        "displaySize": "1.7B"
+    },
+    "Qwen3-4B-q4f16_1-MLC": {
+        "model": "https://huggingface.co/mlc-ai/Qwen3-4B-q4f16_1-MLC/resolve/main/",
+        "model_id": "Qwen3-4B-q4f16_1-MLC",
+        "model_lib": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/v0_2_48/Qwen3-4B-q4f16_1-ctx4k_cs1k-webgpu.wasm",
+        "displaySize": "4B"
+    },
+    "Qwen3-8B-q4f16_1-MLC": {
+        "model": "https://huggingface.co/mlc-ai/Qwen3-8B-q4f16_1-MLC/resolve/main/",
+        "model_id": "Qwen3-8B-q4f16_1-MLC",
+        "model_lib": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/v0_2_48/Qwen3-8B-q4f16_1-ctx4k_cs1k-webgpu.wasm",
+        "displaySize": "8B"
     }
 };
 
@@ -69,9 +93,52 @@ const THEMES = [
 ];
 const MAX_TURNS = 5;
 
+// --- LLMエンジンハンドラ ---
+const WebLLMHandler = {
+    engine: null,
+    selectedModelId: '',
+
+    async load(modelId, progressCallback) {
+        this.selectedModelId = modelId;
+        try {
+            const appConfig = { model_list: [MODELS[modelId]] };
+            this.engine = await CreateMLCEngine(modelId, {
+                initProgressCallback: progressCallback,
+            }, appConfig);
+            return true;
+        } catch (error) {
+            console.error("モデルのロードに失敗 (WebLLMHandler):", error);
+            return false;
+        }
+    },
+
+    async chat(messages, streamCallback) {
+        if (!this.engine) return null;
+        try {
+            const chunks = await this.engine.chat.completions.create({
+                messages: messages,
+                stream: true,
+                max_tokens: 50,
+            });
+            
+            let fullResponse = '';
+            for await (const chunk of chunks) {
+                const content = chunk.choices[0]?.delta?.content || "";
+                if (content) {
+                    fullResponse += content;
+                    streamCallback(content);
+                }
+            }
+            return fullResponse;
+        } catch (error) {
+            console.error("テキスト生成に失敗 (WebLLMHandler):", error);
+            return null;
+        }
+    }
+};
+
 // --- グローバル変数 ---
-let engine = null;
-let selectedModelName = '';
+let llmHandler = WebLLMHandler; // 現在のLLMエンジン
 let isModelLoaded = false;
 let isGameOver = true;
 let isComposing = false;
@@ -93,23 +160,18 @@ function initModelSelect() {
 
 async function loadModel() {
     setUILoading(true);
-    selectedModelName = modelSelect.value;
+    const selectedModelId = modelSelect.value;
     
-    try {
-        const appConfig = { model_list: [MODELS[selectedModelName]] };
-        engine = await CreateMLCEngine(selectedModelName, {
-            initProgressCallback: (initProgress) => {
-                statusEl.textContent = `モデル読込中... ${Math.round(initProgress.progress * 100)}% - ${initProgress.text || ""}`;
-            },
-        }, appConfig);
-        
+    const success = await llmHandler.load(selectedModelId, (progress) => {
+        statusEl.textContent = `モデル読込中... ${Math.round(progress.progress * 100)}% - ${progress.text || ""}`;
+    });
+
+    if (success) {
         isModelLoaded = true;
         setUILoaded();
         resetGame();
-
-    } catch (error) {
-        console.error("モデルのロードに失敗:", error);
-        statusEl.textContent = `モデルのロードに失敗しました: ${error.message}`;
+    } else {
+        statusEl.textContent = `モデルのロードに失敗しました。`;
         setUILoading(false);
     }
 }
@@ -124,14 +186,8 @@ function resetGame() {
     
     const theme = THEMES[Math.floor(Math.random() * THEMES.length)];
     const isEasyMode = easyModeToggle.checked;
-    
-    // モードに応じて禁止ワードを設定
     const forbiddenWords = isEasyMode ? [theme.target] : [...theme.forbidden, theme.target];
-    
-    currentTheme = { 
-        ...theme, 
-        forbidden: forbiddenWords 
-    };
+    currentTheme = { ...theme, forbidden: forbiddenWords };
 
     const systemPrompt = "あなたは知識が豊富なAIアシスタントです。ユーザーからの質問や会話に対して、誠実かつ自然に日本語で応答してください。";
     chatHistory.push({ role: "system", content: systemPrompt });
@@ -162,22 +218,20 @@ async function handleSendMessage() {
 async function generateAIReply() {
     try {
         const aiMessageEl = addAIMessage("");
-        const chunks = await engine.chat.completions.create({
-            messages: chatHistory,
-            stream: true,
-            max_tokens: 50,
-        });
-        
         let fullResponse = '';
-        for await (const chunk of chunks) {
-            const content = chunk.choices[0]?.delta?.content || "";
-            fullResponse += content;
+
+        const finalResponse = await llmHandler.chat(chatHistory, (chunk) => {
+            fullResponse += chunk;
             aiMessageEl.textContent = fullResponse;
             chatLog.scrollTop = chatLog.scrollHeight;
-        }
+        });
 
-        chatHistory.push({ role: "assistant", content: fullResponse });
-        checkGameStatus(fullResponse);
+        if (finalResponse !== null) {
+            chatHistory.push({ role: "assistant", content: finalResponse });
+            checkGameStatus(finalResponse);
+        } else {
+            throw new Error("LLMからの応答がありませんでした。");
+        }
 
     } catch (error) {
         console.error("テキスト生成に失敗:", error);
@@ -212,11 +266,9 @@ function calculateWrappedTextHeight(context, text, maxWidth, lineHeight) {
     let line = '';
     const characters = text.split('');
     let lineCount = 1;
-
     for (let i = 0; i < characters.length; i++) {
         const testLine = line + characters[i];
-        const metrics = context.measureText(testLine);
-        if (metrics.width > maxWidth && i > 0) {
+        if (context.measureText(testLine).width > maxWidth && i > 0) {
             line = characters[i];
             lineCount++;
         } else {
@@ -229,11 +281,9 @@ function calculateWrappedTextHeight(context, text, maxWidth, lineHeight) {
 function wrapText(context, text, x, y, maxWidth, lineHeight) {
     let line = '';
     const characters = text.split('');
-
     for (let i = 0; i < characters.length; i++) {
         const testLine = line + characters[i];
-        const metrics = context.measureText(testLine);
-        if (metrics.width > maxWidth && i > 0) {
+        if (context.measureText(testLine).width > maxWidth && i > 0) {
             context.fillText(line, x, y);
             line = characters[i];
             y += lineHeight;
@@ -254,21 +304,17 @@ function generateShareImage(isSuccess) {
     const logLineHeight = 20;
     const logMargin = 10;
 
-    // --- 1. 高さの事前計算 ---
     let totalHeight = headerHeight + footerHeight;
     ctx.font = '14px sans-serif';
     chatHistory.forEach(item => {
         if (item.role === 'user' || item.role === 'assistant') {
             const text = (item.role === 'user' ? 'あなた: ' : 'AI: ') + item.content;
-            totalHeight += calculateWrappedTextHeight(ctx, text, maxTextWidth, logLineHeight);
-            totalHeight += logMargin;
+            totalHeight += calculateWrappedTextHeight(ctx, text, maxTextWidth, logLineHeight) + logMargin;
         }
     });
 
-    // --- 2. Canvasリサイズ ---
     resultCanvas.height = totalHeight;
 
-    // --- 3. 描画処理 ---
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, width, totalHeight);
     ctx.strokeStyle = '#eeeeee';
@@ -303,7 +349,6 @@ function generateShareImage(isSuccess) {
 
     let currentY = 185;
     ctx.font = '14px sans-serif';
-
     chatHistory.forEach(item => {
         if (item.role === 'user') {
             ctx.textAlign = 'right';
@@ -321,7 +366,7 @@ function generateShareImage(isSuccess) {
     ctx.fillStyle = '#999';
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'right';
-    ctx.fillText(`Model: ${selectedModelName}`, width - padding, totalHeight - 15);
+    ctx.fillText(`Model: ${llmHandler.selectedModelId}`, width - padding, totalHeight - 15);
 }
 
 function saveImage() {
@@ -346,7 +391,7 @@ function setUILoaded() {
     resetBtn.style.display = 'inline-block';
     resetBtn.disabled = false;
     easyModeToggle.disabled = false;
-    statusEl.textContent = `モデル「${selectedModelName}」のロード完了！`;
+    statusEl.textContent = `モデル「${llmHandler.selectedModelId}」のロード完了！`;
 }
 
 function setUIGameActive(active) {
