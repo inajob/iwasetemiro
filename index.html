@@ -98,13 +98,13 @@
         #controls .btn {
             width: 100%;
         }
-        label[for="model-select"] {
+        label {
             display: block;
             margin-bottom: 5px;
             font-size: 0.9em;
             color: #555;
         }
-        #model-select {
+        select {
             width: 100%;
             padding: 8px;
             border-radius: 5px;
@@ -158,6 +158,13 @@
     <div id="game-container">
         <div id="controls">
             <div>
+                <label for="library-select">0. 使用ライブラリを選択</label>
+                <select id="library-select">
+                    <option value="webllm">WebLLM</option>
+                    <option value="wllama">wllama</option>
+                </select>
+            </div>
+            <div>
                 <label for="model-select">1. モデルを選択</label>
                 <select id="model-select"></select>
             </div>
@@ -169,7 +176,7 @@
             <button id="reset-btn" class="btn" disabled>リセット</button>
         </div>
 
-        <div id="status">モデルを選択してください</div>
+        <div id="status">ライブラリとモデルを選択してください</div>
 
         <div id="theme-container" style="display: none;">
             <h2>お題</h2>
@@ -178,7 +185,7 @@
         </div>
         
         <div id="chat-log">
-            <div class="system-message">モデルをロードしてください</div>
+            <div class="system-message">ライブラリとモデルを選択してロードしてください</div>
         </div>
         
         <div id="input-container">

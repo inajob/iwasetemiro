@@ -1,7 +1,9 @@
 import { CreateMLCEngine } from "https://esm.run/@mlc-ai/web-llm";
+import { Wllama } from "https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.5/esm/index.js";
 
 // --- DOM要素 ---
 const statusEl = document.getElementById('status');
+const librarySelect = document.getElementById('library-select');
 const modelSelect = document.getElementById('model-select');
 const loadBtn = document.getElementById('load-btn');
 const resetBtn = document.getElementById('reset-btn');
@@ -18,7 +20,7 @@ const saveImageBtn = document.getElementById('save-image-btn');
 const downloadLink = document.getElementById('download-link');
 
 // --- ゲームとモデルの設定 ---
-const MODELS = {
+const WEBLLM_MODELS = {
     "Qwen2.5-1.5B-Instruct-q4f32_1-MLC": {
         "model": "https://huggingface.co/mlc-ai/Qwen2.5-1.5B-Instruct-q4f32_1-MLC/resolve/main/",
         "model_id": "Qwen2.5-1.5B-Instruct-q4f32_1-MLC",
@@ -42,30 +44,19 @@ const MODELS = {
         "model_id": "Llama-3-8B-Instruct-q4f32_1-MLC",
         "model_lib": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/Llama-3/Llama-3-8B-Instruct-q4f32_1-ctx4k_cs1k-webgpu.wasm",
         "displaySize": "8B"
+    }
+};
+
+const WLLAMA_MODELS = {
+    "Qwen/Qwen2-1.5B-Instruct-GGUF": {
+        "model_url": "https://huggingface.co/Qwen/Qwen2-1.5B-Instruct-GGUF/resolve/main/qwen2-1_5b-instruct-q4_k_m.gguf",
+        "displaySize": "1.5B",
+        "promptType": "qwen2"
     },
-    "Qwen3-0.6B-q4f16_1-MLC": {
-        "model": "https://huggingface.co/mlc-ai/Qwen3-0.6B-q4f16_1-MLC/resolve/main/",
-        "model_id": "Qwen3-0.6B-q4f16_1-MLC",
-        "model_lib": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/v0_2_48/Qwen3-0.6B-q4f16_1-ctx4k_cs1k-webgpu.wasm",
-        "displaySize": "0.6B"
-    },
-    "Qwen3-1.7B-q4f16_1-MLC": {
-        "model": "https://huggingface.co/mlc-ai/Qwen3-1.7B-q4f16_1-MLC/resolve/main/",
-        "model_id": "Qwen3-1.7B-q4f16_1-MLC",
-        "model_lib": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/v0_2_48/Qwen3-1.7B-q4f16_1-ctx4k_cs1k-webgpu.wasm",
-        "displaySize": "1.7B"
-    },
-    "Qwen3-4B-q4f16_1-MLC": {
-        "model": "https://huggingface.co/mlc-ai/Qwen3-4B-q4f16_1-MLC/resolve/main/",
-        "model_id": "Qwen3-4B-q4f16_1-MLC",
-        "model_lib": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/v0_2_48/Qwen3-4B-q4f16_1-ctx4k_cs1k-webgpu.wasm",
-        "displaySize": "4B"
-    },
-    "Qwen3-8B-q4f16_1-MLC": {
-        "model": "https://huggingface.co/mlc-ai/Qwen3-8B-q4f16_1-MLC/resolve/main/",
-        "model_id": "Qwen3-8B-q4f16_1-MLC",
-        "model_lib": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-models/v0_2_48/Qwen3-8B-q4f16_1-ctx4k_cs1k-webgpu.wasm",
-        "displaySize": "8B"
+    "mmnga/plamo-2-1b-gguf": {
+        "model_url": "https://huggingface.co/mmnga/plamo-2-1b-gguf/resolve/main/plamo-2-1b-Q3_K_M.gguf",
+        "displaySize": "1B",
+        "promptType": "plain" // 汎用形式
     }
 };
 
@@ -97,30 +88,21 @@ const MAX_TURNS = 5;
 const WebLLMHandler = {
     engine: null,
     selectedModelId: '',
-
     async load(modelId, progressCallback) {
         this.selectedModelId = modelId;
         try {
-            const appConfig = { model_list: [MODELS[modelId]] };
-            this.engine = await CreateMLCEngine(modelId, {
-                initProgressCallback: progressCallback,
-            }, appConfig);
+            const appConfig = { model_list: [WEBLLM_MODELS[modelId]] };
+            this.engine = await CreateMLCEngine(modelId, { initProgressCallback: progressCallback }, appConfig);
             return true;
         } catch (error) {
             console.error("モデルのロードに失敗 (WebLLMHandler):", error);
             return false;
         }
     },
-
     async chat(messages, streamCallback) {
         if (!this.engine) return null;
         try {
-            const chunks = await this.engine.chat.completions.create({
-                messages: messages,
-                stream: true,
-                max_tokens: 50,
-            });
-            
+            const chunks = await this.engine.chat.completions.create({ messages: messages, stream: true, max_tokens: 50 });
             let fullResponse = '';
             for await (const chunk of chunks) {
                 const content = chunk.choices[0]?.delta?.content || "";
@@ -137,8 +119,90 @@ const WebLLMHandler = {
     }
 };
 
+const WllamaHandler = {
+    wllama: null,
+    selectedModelId: '',
+
+    async load(modelId, progressCallback) {
+        this.selectedModelId = modelId;
+        try {
+            const modelConfig = WLLAMA_MODELS[modelId];
+            const WLLAMA_CONFIG = {
+                'single-thread/wllama.wasm': "https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.5/src/single-thread/wllama.wasm",
+            };
+            this.wllama = new Wllama(WLLAMA_CONFIG);
+            await this.wllama.loadModelFromUrl(
+                modelConfig.model_url,
+                {
+                    onProgress: (progress) => {
+                        const percentage = Math.round((progress.loaded / progress.total) * 100);
+                        progressCallback({ progress: percentage / 100, text: `Downloading... ${percentage}%` });
+                    }
+                }
+            );
+            return true;
+        } catch (error) {
+            console.error("モデルのロードに失敗 (WllamaHandler):", error);
+            return false;
+        }
+    },
+
+    buildPrompt(messages, type = 'plain') {
+        const systemPrompt = messages.find(m => m.role === 'system')?.content || '';
+        let prompt = '';
+
+        if (type === 'qwen2') {
+            prompt = `<|im_start|>system\n${systemPrompt}<|im_end|>\n`;
+            messages.forEach(message => {
+                if (message.role === 'user') {
+                    prompt += `<|im_start|>user\n${message.content}<|im_end|>\n`;
+                } else if (message.role === 'assistant') {
+                    prompt += `<|im_start|>assistant\n${message.content}<|im_end|>\n`;
+                }
+            });
+            prompt += '<|im_start|>assistant\n';
+        } else {
+            // 汎用的な形式
+            prompt = `${systemPrompt}\n\n`;
+            messages.forEach(message => {
+                if (message.role === 'user') {
+                    prompt += `User: ${message.content}\n`;
+                } else if (message.role === 'assistant') {
+                    prompt += `Assistant: ${message.content}\n`;
+                }
+            });
+            prompt += 'Assistant:';
+        }
+        return prompt;
+    },
+
+    async chat(messages, streamCallback) {
+        if (!this.wllama) return null;
+        try {
+            const modelConfig = WLLAMA_MODELS[this.selectedModelId];
+            const prompt = this.buildPrompt(messages, modelConfig.promptType);
+            let fullResponse = '';
+
+            const finalResponseText = await this.wllama.createCompletion(prompt, {
+                n_threads: 4,
+                onNewToken: (token, piece, currentText) => {
+                    const diff = currentText.slice(fullResponse.length);
+                    fullResponse = currentText;
+                    streamCallback(diff);
+                },
+            });
+            
+            return finalResponseText;
+
+        } catch (error) {
+            console.error("テキスト生成に失敗 (WllamaHandler):", error);
+            return null;
+        }
+    }
+};
+
 // --- グローバル変数 ---
-let llmHandler = WebLLMHandler; // 現在のLLMエンジン
+let llmHandler = WebLLMHandler;
 let isModelLoaded = false;
 let isGameOver = true;
 let isComposing = false;
@@ -146,13 +210,17 @@ let turnCount = 0;
 let currentTheme = {};
 let chatHistory = [];
 
-// --- 初期化 ---
+// --- 初期化＆UIロジック ---
 
-function initModelSelect() {
-    for (const modelId in MODELS) {
+function populateModelSelect() {
+    const selectedLibrary = librarySelect.value;
+    const models = selectedLibrary === 'webllm' ? WEBLLM_MODELS : WLLAMA_MODELS;
+    modelSelect.innerHTML = '';
+
+    for (const modelId in models) {
         const option = document.createElement('option');
         option.value = modelId;
-        const displaySize = MODELS[modelId].displaySize || 'サイズ不明';
+        const displaySize = models[modelId].displaySize || 'サイズ不明';
         option.textContent = `${modelId} (${displaySize} params)`;
         modelSelect.appendChild(option);
     }
@@ -160,7 +228,10 @@ function initModelSelect() {
 
 async function loadModel() {
     setUILoading(true);
+    const selectedLibrary = librarySelect.value;
     const selectedModelId = modelSelect.value;
+
+    llmHandler = selectedLibrary === 'webllm' ? WebLLMHandler : WllamaHandler;
     
     const success = await llmHandler.load(selectedModelId, (progress) => {
         statusEl.textContent = `モデル読込中... ${Math.round(progress.progress * 100)}% - ${progress.text || ""}`;
@@ -176,22 +247,17 @@ async function loadModel() {
     }
 }
 
-// --- ゲーム進行 ---
-
 function resetGame() {
     turnCount = 0;
     isGameOver = false;
     chatHistory = [];
     resultContainer.style.display = 'none';
-    
     const theme = THEMES[Math.floor(Math.random() * THEMES.length)];
     const isEasyMode = easyModeToggle.checked;
     const forbiddenWords = isEasyMode ? [theme.target] : [...theme.forbidden, theme.target];
     currentTheme = { ...theme, forbidden: forbiddenWords };
-
     const systemPrompt = "あなたは知識が豊富なAIアシスタントです。ユーザーからの質問や会話に対して、誠実かつ自然に日本語で応答してください。";
     chatHistory.push({ role: "system", content: systemPrompt });
-
     updateThemeDisplay();
     clearChatLog();
     addSystemMessage(`お題決定！禁止ワードを使わずに「${currentTheme.target}」と言わせてみよう！（${MAX_TURNS}ターン勝負）`);
@@ -201,13 +267,11 @@ function resetGame() {
 async function handleSendMessage() {
     const message = userInput.value.trim();
     if (message === "" || isGameOver) return;
-
     const foundForbiddenWord = currentTheme.forbidden.find(word => message.includes(word));
     if (foundForbiddenWord) {
         alert(`禁止ワード「${foundForbiddenWord}」が含まれています！`);
         return;
     }
-
     addUserMessage(message);
     chatHistory.push({ role: "user", content: message });
     userInput.value = "";
@@ -219,20 +283,17 @@ async function generateAIReply() {
     try {
         const aiMessageEl = addAIMessage("");
         let fullResponse = '';
-
         const finalResponse = await llmHandler.chat(chatHistory, (chunk) => {
             fullResponse += chunk;
             aiMessageEl.textContent = fullResponse;
             chatLog.scrollTop = chatLog.scrollHeight;
         });
-
         if (finalResponse !== null) {
             chatHistory.push({ role: "assistant", content: finalResponse });
             checkGameStatus(finalResponse);
         } else {
             throw new Error("LLMからの応答がありませんでした。");
         }
-
     } catch (error) {
         console.error("テキスト生成に失敗:", error);
         addSystemMessage(`エラー: ${error.message}`);
@@ -259,8 +320,6 @@ function checkGameStatus(aiResponse) {
         setUIGameActive(true);
     }
 }
-
-// --- 画像生成＆保存 ---
 
 function calculateWrappedTextHeight(context, text, maxWidth, lineHeight) {
     let line = '';
@@ -303,7 +362,6 @@ function generateShareImage(isSuccess) {
     const footerHeight = 40;
     const logLineHeight = 20;
     const logMargin = 10;
-
     let totalHeight = headerHeight + footerHeight;
     ctx.font = '14px sans-serif';
     chatHistory.forEach(item => {
@@ -312,20 +370,16 @@ function generateShareImage(isSuccess) {
             totalHeight += calculateWrappedTextHeight(ctx, text, maxTextWidth, logLineHeight) + logMargin;
         }
     });
-
     resultCanvas.height = totalHeight;
-
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, width, totalHeight);
     ctx.strokeStyle = '#eeeeee';
     ctx.lineWidth = padding;
     ctx.strokeRect(0, 0, width, totalHeight);
-
     ctx.fillStyle = '#333';
     ctx.font = 'bold 28px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('言わせてみろ！', width / 2, 55);
-
     if (isSuccess) {
         ctx.fillStyle = '#4285f4';
         ctx.font = 'bold 40px sans-serif';
@@ -335,18 +389,15 @@ function generateShareImage(isSuccess) {
         ctx.font = 'bold 40px sans-serif';
         ctx.fillText('FAILED...', width / 2, 105);
     }
-
     ctx.fillStyle = '#555';
     ctx.font = '18px sans-serif';
     ctx.fillText(`お題: ${currentTheme.target}`, width / 2, 140);
-
     ctx.beginPath();
     ctx.moveTo(padding, 160);
     ctx.lineTo(width - padding, 160);
     ctx.strokeStyle = '#dddddd';
     ctx.lineWidth = 1;
     ctx.stroke();
-
     let currentY = 185;
     ctx.font = '14px sans-serif';
     chatHistory.forEach(item => {
@@ -362,11 +413,10 @@ function generateShareImage(isSuccess) {
             currentY += calculateWrappedTextHeight(ctx, `AI: ${item.content}`, maxTextWidth, logLineHeight) + logMargin;
         }
     });
-
     ctx.fillStyle = '#999';
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'right';
-    ctx.fillText(`Model: ${llmHandler.selectedModelId}`, width - padding, totalHeight - 15);
+    ctx.fillText(`Model: ${modelSelect.value}`, width - padding, totalHeight - 15);
 }
 
 function saveImage() {
@@ -376,9 +426,8 @@ function saveImage() {
     downloadLink.click();
 }
 
-// --- UI更新ヘルパー ---
-
 function setUILoading(isLoading) {
+    librarySelect.disabled = isLoading;
     modelSelect.disabled = isLoading;
     loadBtn.disabled = isLoading;
     easyModeToggle.disabled = isLoading;
@@ -386,12 +435,14 @@ function setUILoading(isLoading) {
 
 function setUILoaded() {
     loadBtn.style.display = 'none';
+    librarySelect.style.display = 'none';
     modelSelect.style.display = 'none';
+    document.querySelector('label[for="library-select"]').style.display = 'none';
     document.querySelector('label[for="model-select"]').style.display = 'none';
     resetBtn.style.display = 'inline-block';
     resetBtn.disabled = false;
     easyModeToggle.disabled = false;
-    statusEl.textContent = `モデル「${llmHandler.selectedModelId}」のロード完了！`;
+    statusEl.textContent = `モデル「${modelSelect.value}」のロード完了！`;
 }
 
 function setUIGameActive(active) {
@@ -442,18 +493,14 @@ function addSystemMessage(text) {
 }
 
 // --- イベントリスナー ---
+librarySelect.addEventListener('change', populateModelSelect);
 loadBtn.addEventListener('click', loadModel);
 resetBtn.addEventListener('click', resetGame);
 sendBtn.addEventListener('click', handleSendMessage);
 saveImageBtn.addEventListener('click', saveImage);
 
-// 日本語入力対応
-userInput.addEventListener('compositionstart', () => {
-    isComposing = true;
-});
-userInput.addEventListener('compositionend', () => {
-    isComposing = false;
-});
+userInput.addEventListener('compositionstart', () => { isComposing = true; });
+userInput.addEventListener('compositionend', () => { isComposing = false; });
 userInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !userInput.disabled && !isComposing) {
         e.preventDefault();
@@ -462,5 +509,5 @@ userInput.addEventListener('keydown', (e) => {
 });
 
 // --- 初期実行 ---
-initModelSelect();
-addSystemMessage("モデルを選択してロードしてください。");
+populateModelSelect();
+addSystemMessage("ライブラリとモデルを選択してロードしてください。");
