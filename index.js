@@ -7,6 +7,8 @@ const librarySelect = document.getElementById('library-select');
 const modelSelect = document.getElementById('model-select');
 const loadBtn = document.getElementById('load-btn');
 const resetBtn = document.getElementById('reset-btn');
+const randomThemeBtn = document.getElementById('random-theme-btn');
+const createThemeBtn = document.getElementById('create-theme-btn');
 const easyModeToggle = document.getElementById('easy-mode-toggle');
 const themeContainer = document.getElementById('theme-container');
 const targetWordDisplay = document.getElementById('target-word-display');
@@ -18,6 +20,14 @@ const resultContainer = document.getElementById('result-container');
 const resultCanvas = document.getElementById('result-canvas');
 const saveImageBtn = document.getElementById('save-image-btn');
 const downloadLink = document.getElementById('download-link');
+// Modal elements
+const themeModal = document.getElementById('theme-modal');
+const closeModalBtn = document.getElementById('close-modal-btn');
+const modalTargetInput = document.getElementById('modal-target-input');
+const modalForbiddenInput = document.getElementById('modal-forbidden-input');
+const modalGeneratedUrl = document.getElementById('modal-generated-url');
+const generateUrlBtn = document.getElementById('generate-url-btn');
+const copyUrlBtn = document.getElementById('copy-url-btn');
 
 // --- ゲームとモデルの設定 ---
 const WEBLLM_MODELS = {
@@ -54,9 +64,9 @@ const WLLAMA_MODELS = {
         "promptType": "qwen2"
     },
     "mmnga/plamo-2-1b-gguf": {
-        "model_url": "https://huggingface.co/mmnga/plamo-2-1b-gguf/resolve/main/plamo-2-1b-Q3_K_M.gguf",
+        "model_url": "https://huggingface.co/mmnga/plamo-2-1b-gguf/resolve/main/plamo-2-1b-Q4_0.gguf",
         "displaySize": "1B",
-        "promptType": "plain" // 汎用形式
+        "promptType": "plain"
     }
 };
 
@@ -122,13 +132,13 @@ const WebLLMHandler = {
 const WllamaHandler = {
     wllama: null,
     selectedModelId: '',
-
     async load(modelId, progressCallback) {
         this.selectedModelId = modelId;
         try {
             const modelConfig = WLLAMA_MODELS[modelId];
             const WLLAMA_CONFIG = {
-                'single-thread/wllama.wasm': "https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.5/src/single-thread/wllama.wasm",
+                'wllama.js': "https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.5/dist/wllama.js",
+                'wllama.wasm': "https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.5/dist/wllama.wasm",
             };
             this.wllama = new Wllama(WLLAMA_CONFIG);
             await this.wllama.loadModelFromUrl(
@@ -146,11 +156,9 @@ const WllamaHandler = {
             return false;
         }
     },
-
     buildPrompt(messages, type = 'plain') {
         const systemPrompt = messages.find(m => m.role === 'system')?.content || '';
         let prompt = '';
-
         if (type === 'qwen2') {
             prompt = `<|im_start|>system\n${systemPrompt}<|im_end|>\n`;
             messages.forEach(message => {
@@ -162,7 +170,6 @@ const WllamaHandler = {
             });
             prompt += '<|im_start|>assistant\n';
         } else {
-            // 汎用的な形式
             prompt = `${systemPrompt}\n\n`;
             messages.forEach(message => {
                 if (message.role === 'user') {
@@ -175,25 +182,22 @@ const WllamaHandler = {
         }
         return prompt;
     },
-
     async chat(messages, streamCallback) {
         if (!this.wllama) return null;
         try {
             const modelConfig = WLLAMA_MODELS[this.selectedModelId];
             const prompt = this.buildPrompt(messages, modelConfig.promptType);
             let fullResponse = '';
-
             const finalResponseText = await this.wllama.createCompletion(prompt, {
                 n_threads: 4,
+                n_predict: 50,
                 onNewToken: (token, piece, currentText) => {
                     const diff = currentText.slice(fullResponse.length);
                     fullResponse = currentText;
                     streamCallback(diff);
                 },
             });
-            
             return finalResponseText;
-
         } catch (error) {
             console.error("テキスト生成に失敗 (WllamaHandler):", error);
             return null;
@@ -216,7 +220,6 @@ function populateModelSelect() {
     const selectedLibrary = librarySelect.value;
     const models = selectedLibrary === 'webllm' ? WEBLLM_MODELS : WLLAMA_MODELS;
     modelSelect.innerHTML = '';
-
     for (const modelId in models) {
         const option = document.createElement('option');
         option.value = modelId;
@@ -230,13 +233,10 @@ async function loadModel() {
     setUILoading(true);
     const selectedLibrary = librarySelect.value;
     const selectedModelId = modelSelect.value;
-
     llmHandler = selectedLibrary === 'webllm' ? WebLLMHandler : WllamaHandler;
-    
     const success = await llmHandler.load(selectedModelId, (progress) => {
         statusEl.textContent = `モデル読込中... ${Math.round(progress.progress * 100)}% - ${progress.text || ""}`;
     });
-
     if (success) {
         isModelLoaded = true;
         setUILoaded();
@@ -252,12 +252,37 @@ function resetGame() {
     isGameOver = false;
     chatHistory = [];
     resultContainer.style.display = 'none';
-    const theme = THEMES[Math.floor(Math.random() * THEMES.length)];
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const targetFromUrl = urlParams.get('target');
+    const forbiddenFromUrl = urlParams.get('forbidden');
+    let theme;
+
+    if (targetFromUrl && forbiddenFromUrl) {
+        theme = {
+            target: decodeURIComponent(targetFromUrl),
+            forbidden: decodeURIComponent(forbiddenFromUrl).split(',')
+        };
+        easyModeToggle.checked = false;
+        easyModeToggle.disabled = true;
+        resetBtn.textContent = 'このお題で再挑戦';
+        randomThemeBtn.style.display = 'block';
+        createThemeBtn.style.display = 'none';
+    } else {
+        theme = THEMES[Math.floor(Math.random() * THEMES.length)];
+        easyModeToggle.disabled = false;
+        resetBtn.textContent = '別のお題でリセット';
+        randomThemeBtn.style.display = 'none';
+        createThemeBtn.style.display = 'block';
+    }
+    
     const isEasyMode = easyModeToggle.checked;
     const forbiddenWords = isEasyMode ? [theme.target] : [...theme.forbidden, theme.target];
     currentTheme = { ...theme, forbidden: forbiddenWords };
+
     const systemPrompt = "あなたは知識が豊富なAIアシスタントです。ユーザーからの質問や会話に対して、誠実かつ自然に日本語で応答してください。";
     chatHistory.push({ role: "system", content: systemPrompt });
+
     updateThemeDisplay();
     clearChatLog();
     addSystemMessage(`お題決定！禁止ワードを使わずに「${currentTheme.target}」と言わせてみよう！（${MAX_TURNS}ターン勝負）`);
@@ -442,7 +467,7 @@ function setUILoaded() {
     resetBtn.style.display = 'inline-block';
     resetBtn.disabled = false;
     easyModeToggle.disabled = false;
-    statusEl.textContent = `モデル「${modelSelect.value}」のロード完了！`;
+    createThemeBtn.style.display = 'block'; // ロード完了後に表示
 }
 
 function setUIGameActive(active) {
@@ -496,6 +521,44 @@ function addSystemMessage(text) {
 librarySelect.addEventListener('change', populateModelSelect);
 loadBtn.addEventListener('click', loadModel);
 resetBtn.addEventListener('click', resetGame);
+randomThemeBtn.addEventListener('click', () => {
+    window.location.href = window.location.pathname;
+});
+createThemeBtn.addEventListener('click', () => {
+    themeModal.style.display = 'block';
+});
+closeModalBtn.addEventListener('click', () => {
+    themeModal.style.display = 'none';
+});
+window.addEventListener('click', (event) => {
+    if (event.target == themeModal) {
+        themeModal.style.display = 'none';
+    }
+});
+generateUrlBtn.addEventListener('click', () => {
+    const target = modalTargetInput.value.trim();
+    const forbidden = modalForbiddenInput.value.trim();
+    if (!target || !forbidden) {
+        alert('目標ワードと禁止ワードを両方入力してください。');
+        return;
+    }
+    const encodedTarget = encodeURIComponent(target);
+    const encodedForbidden = encodeURIComponent(forbidden);
+    const url = `${window.location.origin}${window.location.pathname}?target=${encodedTarget}&forbidden=${encodedForbidden}`;
+    modalGeneratedUrl.value = url;
+});
+copyUrlBtn.addEventListener('click', () => {
+    if (!modalGeneratedUrl.value) {
+        alert('先にURLを生成してください。');
+        return;
+    }
+    navigator.clipboard.writeText(modalGeneratedUrl.value).then(() => {
+        copyUrlBtn.textContent = 'コピーしました！';
+        setTimeout(() => {
+            copyUrlBtn.textContent = 'コピー';
+        }, 2000);
+    });
+});
 sendBtn.addEventListener('click', handleSendMessage);
 saveImageBtn.addEventListener('click', saveImage);
 
@@ -510,4 +573,4 @@ userInput.addEventListener('keydown', (e) => {
 
 // --- 初期実行 ---
 populateModelSelect();
-addSystemMessage("ライブラリとモデルを選択してロードしてください。");
+resetGame(); // ゲーム開始時にURLをチェックするように変更
