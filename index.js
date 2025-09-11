@@ -137,8 +137,7 @@ const WllamaHandler = {
         try {
             const modelConfig = WLLAMA_MODELS[modelId];
             const WLLAMA_CONFIG = {
-                'wllama.js': "https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.5/dist/wllama.js",
-                'wllama.wasm': "https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.5/dist/wllama.wasm",
+		'single-thread/wllama.wasm': "https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.5/src/single-thread/wllama.wasm"
             };
             this.wllama = new Wllama(WLLAMA_CONFIG);
             await this.wllama.loadModelFromUrl(
